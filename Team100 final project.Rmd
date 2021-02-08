@@ -1,0 +1,299 @@
+---
+title: "What Influences Life Expectancy?"
+date: '12/12/2020'
+author: Jingqi Kou(jingqik2); Zhan Shi(zhans5); Lang Zhou(langz2); Yiyang Li(yiyang18)
+version: 0.0.4
+output:
+  html_document: 
+  toc: yes
+pdf_document: default
+urlcolor: cyan
+---
+  
+***
+  
+# Introduction
+  In this data analysis project, we explored the data set on [Kaggle] (https://www.kaggle.com/kumarajarshi/life-expectancy-who), which is mainly about life expectancy in 193 countries from 2000 to 2015 And unique factors related to health. Contains 2938 observations and 20 predictors, which can be divided into 4
+
+Categories: immune-related factors, mortality factors, economic factors and social factors.
+
+Our main goal is to build a model that is as accurate as possible to analyze the factors that affect life span. These attributes are represented by a wide range of variables in the data set, including everything from adult mortality and government expenditures.
+
+***
+  
+# Methods
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+library(rsq)
+library(lmtest)
+library(ggplot2)
+library(faraway)
+library(corrplot)
+```
+
+## Data Preparation
+
+First, we load the training data and extract the number of samples and the feature names:
+
+```{r}
+train_data = read.csv('Life Expectancy Data.csv')
+n = nrow(train_data)
+features = setdiff(colnames(train_data), c("Adult Mortality", "percentage expenditure"))
+```
+
+The dataset includes **`r length(features)` features** and **`r n` samples.**
+
+# Dealing with Missing Predictor Values
+Naturally, we expect that some examples are missing features, let's try removing those samples and see how much data we'd have left to work with:
+
+```{r}
+train_data_omit_na = na.omit(train_data)
+nrow(train_data_omit_na)
+```
+
+It appears every sample has is missing at least one feature. So we can't simply omit them or we'll have nothing left to work with! For factor variables with missing values, we can simply create a new *`other`* category to fill in for *`NA`* values. 
+
+```{r}
+other_category = 'other'
+for (f in features) {
+  if (is.factor(train_data[[f]]) && any(is.na(train_data[[f]]))) {
+    levels(train_data[[f]]) = c(levels(train_data[[f]]), other_category)
+    train_data[[f]][is.na(train_data[[f]])] = other_category
+  }
+}
+# Try omitting samples with missing features again:
+train_data_omit_na = na.omit(train_data)
+nrow(train_data_omit_na)
+```
+
+This appears to solve most of the problem, but we're still losing `r n - nrow(train_data_omit_na)` samples, since they have missing numeric feature values. Since they're a large portion (`r round((n*1.0 - nrow(train_data_omit_na)) / n * 100)`% of the dataset), we don't want to ignore them. Unfortunately, finding suitable replacement values for numeric features is more difficult.
+
+Let's see which features have missing values:
+
+```{r}
+Filter(function (f) any(is.na(train_data[[f]])), features)
+```
+
+We decide to omit the missing values and obtain the new dataset called data.
+
+```{r}
+#We omit the rows with missing values
+data = na.omit(train_data)
+```
+
+**Success!** We've managed to replace all of the missing values without losing any training samples.
+
+
+# Further Analysis 
+
+```{r}
+#Viewing the New Data Frame
+print(str(data))
+```
+
+Then, we coerce Status, Country and Year variables to be factor variables.
+
+```{r}
+is.factor(data$Status)
+```
+
+
+```{r}
+is.factor(data$Country)
+```
+
+```{r}
+is.factor(data$Year)
+```
+
+
+```{r}
+data$Country = as.factor(data$Country)
+data$Status = as.factor(data$Status)
+data$Year = as.factor(data$Year)
+print(str(data))
+```
+
+We will compare the two models below. For the larger one - model_overall, we use Life.expectancy as the reponse and all the other variables except Country and Year as predictors. For the smaller one - model_select, we pick one representative variable from each factor category in the introduction as the predictors and Life.expectancy still serves as the response.
+
+```{r}
+#Constructing models
+model_overall = lm(Life.expectancy ~ . - Country - Year, data = data)
+model_select = lm(Life.expectancy ~ Population + GDP + Adult.Mortality + Measles, data = data)
+anova(model_select, model_overall)
+```
+
+Based on the results, p-value is $2.2 \times 10^{-16}$ which is very small so we prefer the larger model 'model_overall'.
+
+
+
+```{r}
+summary(model_overall)
+```
+
+Here, we notice that variables including Hepatitis.B, Measles, Polio, Total.expenditure, GDP, Population, thinness..1.19.years, thinness.5.9.years are not significant because of larger p-values. Next, we will construct the model by removing those insignificant variables.
+
+```{r}
+model_overall_reduced = lm(Life.expectancy ~ . - Country - Year - Hepatitis.B - Measles - Polio - GDP- Population-thinness..1.19.years- thinness.5.9.years - Total.expenditure, data = data)
+anova(model_overall_reduced, model_overall)
+```
+
+The p-value which is large verifies our decision to use the model without the insignificant variables.
+
+
+Next, we will check the collinearity.
+
+
+```{r}
+vif(model_overall_reduced)
+```
+
+
+Based on the result, we notice that there is a collinearity issue between infant deaths and under.five.deaths so we will construct a new model by removing the variable 'infant.deaths'.
+
+```{r}
+model_overall_reduced_infant.deaths = lm(Life.expectancy ~ . - Country - Year - Hepatitis.B - Measles - Polio - GDP- Population-thinness..1.19.years- thinness.5.9.years - Total.expenditure - infant.deaths, data = data)
+```
+
+Next, we will check whether this new model violates any assumption.
+
+```{r}
+par(mfrow=c(1,2))
+plot(fitted(model_overall_reduced_infant.deaths), resid(model_overall_reduced_infant.deaths), col = "grey", pch = 20,
+     xlab = "Fitted", ylab = "Residuals", main = "residual plot")
+abline(h = 0, col = "darkorange", lwd = 2)
+
+qqnorm(resid(model_overall_reduced_infant.deaths), main = "Normal Q-Q Plot", col = "darkgrey")
+qqline(resid(model_overall_reduced_infant.deaths), col = "dodgerblue", lwd = 2)
+```
+
+```{r}
+bptest(model_overall_reduced_infant.deaths)
+```
+
+
+```{r}
+shapiro.test(resid(model_overall_reduced_infant.deaths))
+```
+
+
+Based on the plots, both constant assumption and normality assumption are violated.
+
+
+Then, we decide to use quadratic transformation for the predictor variables to see whether this situation can be improved.
+
+```{r}
+model_overall_reduced_trans = lm(Life.expectancy ~ . - Country - Year - Hepatitis.B - Measles - Polio - GDP- Population-thinness..1.19.years- thinness.5.9.years - Total.expenditure - infant.deaths + I(Adult.Mortality ^ 2), data = data)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+plot(fitted(model_overall_reduced_trans), resid(model_overall_reduced_trans), col = "grey", pch = 20,
+     xlab = "Fitted", ylab = "Residuals", main = "residual plot")
+abline(h = 0, col = "darkorange", lwd = 2)
+
+qqnorm(resid(model_overall_reduced_trans), main = "Normal Q-Q Plot", col = "darkgrey")
+qqline(resid(model_overall_reduced_trans), col = "dodgerblue", lwd = 2)
+```
+
+
+We don't see any improvements after the transformation on the predictor variables so we will check for any influential observations.
+
+```{r}
+model_cook = cooks.distance(model_overall_reduced_infant.deaths)
+model_cook[model_cook > 4/length(model_cook)]
+```
+
+Then, we will refit the model without points we identified as influential.
+
+```{r}
+new_data = data[model_cook <= 4/length(model_cook),]
+model_refit = lm(Life.expectancy ~ . - Country - Year - Hepatitis.B - Measles - Polio - GDP- Population-thinness..1.19.years- thinness.5.9.years - Total.expenditure - infant.deaths, data = new_data)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+plot(fitted(model_refit), resid(model_refit), col = "grey", pch = 20,
+     xlab = "Fitted", ylab = "Residuals", main = "Residuals Plot")
+abline(h = 0, col = "darkorange", lwd = 2)
+
+qqnorm(resid(model_refit), main = "Normal Q-Q Plot", col = "darkgrey")
+qqline(resid(model_refit), col = "dodgerblue", lwd = 2)
+```
+
+
+We see that residuals plot and Q-Q plot get better so we use model_refit as our final model.
+
+***
+# Results
+
+We decide to use Status, Adult.Mortality, Alcohol, percentage.expenditure, BMI, under.five.deaths, Diphtheria, HIV.AIDS, 
+Income.composition.of.resources, Schooling as predictors and Life.expectancy as response to construct the final model.
+
+```{r}
+final_model = model_refit
+summary(final_model)
+```
+
+```{r}
+par(mfrow = c(3,3))
+plot(Life.expectancy ~ Adult.Mortality, data = new_data, xlab = "Adult.Mortality", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ Adult.Mortality, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ Alcohol, data = new_data, xlab = "Alcohol", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ Alcohol, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ percentage.expenditure, data = new_data, xlab = "percentage.expenditure", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ percentage.expenditure, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ BMI, data = new_data, xlab = "BMI", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ BMI, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ under.five.deaths, data = new_data, xlab = "under.five.deaths", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ under.five.deaths, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ Diphtheria, data = new_data, xlab = "Diphtheria", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ Diphtheria, data = new_data), col = "orange", lwd = 2)
+grid()
+
+plot(Life.expectancy ~ HIV.AIDS, data = new_data, xlab = "HIV.AIDS", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~HIV.AIDS, data = new_data), col = "orange", lwd = 2)
+grid()
+
+
+plot(Life.expectancy ~ Income.composition.of.resources, data = new_data, xlab = "Income.composition.of.resources", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~Income.composition.of.resources, data = new_data), col = "orange", lwd = 2)
+grid()
+
+
+plot(Life.expectancy ~ Schooling, data = new_data, xlab = "Schooling", ylab = "Life Expectancy (ages)", col = "grey", pch  = 20, cex  = 1.5)
+abline(lm(Life.expectancy ~ Schooling, data = new_data), col = "orange", lwd = 2)
+grid()
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+plot(fitted(final_model), resid(final_model), col = "grey", pch = 20,
+     xlab = "Fitted", ylab = "Residuals", main = "Residuals Plot")
+abline(h = 0, col = "darkorange", lwd = 2)
+
+qqnorm(resid(final_model), main = "Normal Q-Q Plot", col = "darkgrey")
+qqline(resid(final_model), col = "dodgerblue", lwd = 2)
+```
+***
+
+# Discussion
+
+We used many methods to obtain the final model as described in the "Results" bulk. First, we check whether there are any missing values in the dataset and then we remove them for the analysis. Next, We used to ANOVA test to get a better model. After removing the insignificant variables, considering collinearity issue, checking for any assumption violation and doing some transformation, we eventually obtain our final model. For the final model, the factors from every influential factor categories are used to predict the life expectancy. From the results, we notice that Life expectancy havs positive relationship with Alcohol, Percentage Expenditure, BMI, Diphtheria and Income composition of resources and has negative relationship with adult mortality, under five deaths and HIV.aids. The graphs shows the relationship clearly so this model is good for prediction.
+
+
+***
+
